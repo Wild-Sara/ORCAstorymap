@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bat Telemetry Flight Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  html, body { margin:0; padding:0; height:100%; background:#15140f; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+  #map { width:100%; height:100vh; background:#15140f; }
+  .leaflet-container { background:#15140f; }
+
+  .receiver-icon, .capture-icon { filter: drop-shadow(0 0 3px rgba(0,0,0,0.6)); }
+
+  .site-label {
+    color: #e8e2d4;
+    font-size: 12px;
+    font-weight: 600;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.9);
+    white-space: nowrap;
+    pointer-events: none;
+    letter-spacing: 0.02em;
+  }
+
+  .bat-marker {
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+    filter: drop-shadow(0 1px 4px rgba(0,0,0,0.7));
+  }
+
+  .legend {
+    position: absolute; bottom: 16px; left: 16px;
+    background: rgba(21, 20, 15, 0.88);
+    border: 1px solid rgba(232, 226, 212, 0.15);
+    border-radius: 6px; padding: 12px 16px;
+    color: #e8e2d4; font-size: 12.5px; line-height: 1.7;
+    z-index: 1000; backdrop-filter: blur(3px); max-width: 230px;
+  }
+  .legend-row { display:flex; align-items:center; gap:8px; }
+  .legend-swatch { width:20px; height:14px; flex-shrink:0; object-fit:contain; }
+  .legend-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.55; margin-bottom: 6px; margin-top: 10px; }
+  .legend-title:first-child { margin-top: 0; }
+
+  .clock {
+    position: absolute; top: 16px; left: 16px;
+    background: rgba(21, 20, 15, 0.88);
+    border: 1px solid rgba(232, 226, 212, 0.15);
+    border-radius: 6px; padding: 8px 14px;
+    color: #e8e2d4; font-size: 13px; z-index: 1000;
+    font-variant-numeric: tabular-nums; backdrop-filter: blur(3px);
+  }
+  .clock .date { opacity: 0.6; font-size: 11px; }
+
+  .signal-note {
+    position: absolute; bottom: 16px; right: 16px;
+    background: rgba(21, 20, 15, 0.88);
+    border: 1px solid rgba(232, 226, 212, 0.15);
+    border-radius: 6px; padding: 10px 14px;
+    color: #e8e2d4; font-size: 11.5px; line-height: 1.5;
+    z-index: 1000; max-width: 190px; backdrop-filter: blur(3px);
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="clock"><div class="time" id="clockTime">--:--</div><div class="date" id="clockDate">-- -- ----</div></div>
+<div class="legend" id="legend"></div>
+<div class="signal-note">Loop size at each stop reflects signal strength: tighter loops mean a stronger signal (closer to the tower).</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const DATA = {"receivers": {"Bigelow": [42.09019438937389, -123.37205183944509], "CC Camp": [42.11929134820974, -123.42542671428782], "Repeater": [42.104193426852746, -123.41228736793445]}, "capture": {"149": [42.11608, -123.434304], "160": [42.11608, -123.434304], "163": [42.090233, -123.377953]}, "species": {"149": "LANO", "160": "MYEV", "163": "LACI"}, "bats": {"149": {"species": "LANO", "segments": [{"type": "flight", "from": [42.11608, -123.434304], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 2.4, "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 50.0, "real_start": "2023-09-16T00:00:04", "real_end": "2023-09-16T00:00:04"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 28.0, "real_start": "2023-09-16T00:05:10", "real_end": "2023-09-16T00:05:10"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 4.2, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 56.0, "real_start": "2023-09-16T01:00:03", "real_end": "2023-09-16T01:00:03"}, {"type": "offscreen", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 3.6, "gap_hours": 42.8, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 52.0, "real_start": "2023-09-17T19:48:17", "real_end": "2023-09-17T19:48:17"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 1.68, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 43.0, "real_start": "2023-09-17T20:00:02", "real_end": "2023-09-17T20:00:02"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 33.0, "real_start": "2023-09-17T20:11:06", "real_end": "2023-09-17T20:11:06"}, {"type": "offscreen", "from": [42.09019438937389, -123.37205183944509], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 3.6, "gap_hours": 2.7, "label_from": "Bigelow", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 45.0, "real_start": "2023-09-17T22:54:46", "real_end": "2023-09-17T23:04:35"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 1.64, "label_from": "Repeater", "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 35.0, "real_start": "2023-09-17T23:16:03", "real_end": "2023-09-17T23:16:03"}, {"type": "flight", "from": [42.09019438937389, -123.37205183944509], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 4.2, "label_from": "Bigelow", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 57.2, "real_start": "2023-09-18T00:00:03", "real_end": "2023-09-18T03:00:10"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 32.0, "real_start": "2023-09-18T03:07:59", "real_end": "2023-09-18T03:07:59"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 4.2, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 41.0, "real_start": "2023-09-18T04:00:02", "real_end": "2023-09-18T04:00:02"}], "total_anim_seconds": 43.52, "n_stays": 11}, "160": {"species": "MYEV", "segments": [{"type": "flight", "from": [42.11608, -123.434304], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 2.4, "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 4.0, "n_loops": 3, "avg_signal": 31.4, "real_start": "2023-09-16T02:30:00", "real_end": "2023-09-16T19:31:32"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 35.0, "real_start": "2023-09-16T19:42:28", "real_end": "2023-09-16T19:42:28"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 2.53, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 34.0, "real_start": "2023-09-16T20:00:09", "real_end": "2023-09-16T20:00:09"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 36.0, "real_start": "2023-09-16T20:11:11", "real_end": "2023-09-16T20:11:11"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 4.2, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.61, "n_loops": 1, "avg_signal": 40.0, "real_start": "2023-09-16T21:00:03", "real_end": "2023-09-17T02:22:34"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 37.0, "real_start": "2023-09-17T02:33:00", "real_end": "2023-09-17T02:33:00"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 3.86, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 4.0, "n_loops": 3, "avg_signal": 48.2, "real_start": "2023-09-17T03:00:01", "real_end": "2023-09-17T19:29:15"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 36.0, "real_start": "2023-09-17T19:33:48", "real_end": "2023-09-17T19:33:48"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 3.74, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 48.0, "real_start": "2023-09-17T20:00:00", "real_end": "2023-09-17T20:00:00"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 37.0, "real_start": "2023-09-17T20:05:31", "real_end": "2023-09-17T20:05:31"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 4.2, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 45.0, "real_start": "2023-09-17T21:00:01", "real_end": "2023-09-17T21:00:01"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 4.2, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 40.0, "real_start": "2023-09-17T22:00:03", "real_end": "2023-09-17T22:00:03"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 4.2, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 4.0, "n_loops": 3, "avg_signal": 41.6, "real_start": "2023-09-17T23:00:33", "real_end": "2023-09-18T19:30:13"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 45.0, "real_start": "2023-09-18T19:40:10", "real_end": "2023-09-18T19:40:10"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 3.97, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 45.5, "real_start": "2023-09-18T20:07:59", "real_end": "2023-09-18T21:00:01"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 4.2, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 20.0, "real_start": "2023-09-18T22:00:21", "real_end": "2023-09-18T22:00:21"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 2.93, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 42.0, "real_start": "2023-09-18T22:20:53", "real_end": "2023-09-18T22:20:53"}], "total_anim_seconds": 79.24, "n_stays": 17}, "163": {"species": "LACI", "segments": [{"type": "flight", "from": [42.090233, -123.377953], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 2.4, "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 42.0, "real_start": "2023-09-17T20:53:45", "real_end": "2023-09-17T21:00:11"}, {"type": "flight", "from": [42.09019438937389, -123.37205183944509], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 2.42, "label_from": "Bigelow", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 38.0, "real_start": "2023-09-17T21:17:07", "real_end": "2023-09-17T21:17:07"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 4.2, "label_from": "CC Camp", "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 43.5, "real_start": "2023-09-17T22:00:00", "real_end": "2023-09-17T23:00:04"}, {"type": "flight", "from": [42.09019438937389, -123.37205183944509], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 1.6, "label_from": "Bigelow", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 40.0, "real_start": "2023-09-17T23:08:15", "real_end": "2023-09-17T23:08:15"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 4.2, "label_from": "CC Camp", "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 27.0, "real_start": "2023-09-18T00:00:01", "real_end": "2023-09-18T00:00:01"}, {"type": "flight", "from": [42.09019438937389, -123.37205183944509], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 1.78, "label_from": "Bigelow", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 45.0, "real_start": "2023-09-18T00:12:27", "real_end": "2023-09-18T00:12:27"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 4.2, "label_from": "Repeater", "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 51.5, "real_start": "2023-09-18T01:00:22", "real_end": "2023-09-18T02:00:04"}, {"type": "flight", "from": [42.09019438937389, -123.37205183944509], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 2.6, "label_from": "Bigelow", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 42.0, "real_start": "2023-09-18T02:18:16", "real_end": "2023-09-18T02:18:16"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 4.2, "label_from": "Repeater", "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 69.0, "real_start": "2023-09-18T03:00:08", "real_end": "2023-09-18T03:00:08"}, {"type": "flight", "from": [42.09019438937389, -123.37205183944509], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 4.2, "label_from": "Bigelow", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 4.0, "n_loops": 3, "avg_signal": 40.2, "real_start": "2023-09-18T03:51:37", "real_end": "2023-09-18T20:00:04"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 1.6, "label_from": "CC Camp", "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 26.0, "real_start": "2023-09-18T20:05:07", "real_end": "2023-09-18T20:05:07"}, {"type": "flight", "from": [42.09019438937389, -123.37205183944509], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 4.2, "label_from": "Bigelow", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 55.0, "real_start": "2023-09-18T21:06:37", "real_end": "2023-09-18T21:06:37"}, {"type": "offscreen", "from": [42.104193426852746, -123.41228736793445], "to": [42.11929134820974, -123.42542671428782], "anim_dur": 3.6, "gap_hours": 2.2, "label_from": "Repeater", "label_to": "CC Camp"}, {"type": "stay", "at": [42.11929134820974, -123.42542671428782], "location": "CC Camp", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 38.0, "real_start": "2023-09-18T23:19:51", "real_end": "2023-09-18T23:19:51"}, {"type": "flight", "from": [42.11929134820974, -123.42542671428782], "to": [42.104193426852746, -123.41228736793445], "anim_dur": 3.37, "label_from": "CC Camp", "label_to": "Repeater"}, {"type": "stay", "at": [42.104193426852746, -123.41228736793445], "location": "Repeater", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 34.0, "real_start": "2023-09-18T23:43:28", "real_end": "2023-09-18T23:43:28"}, {"type": "flight", "from": [42.104193426852746, -123.41228736793445], "to": [42.09019438937389, -123.37205183944509], "anim_dur": 1.6, "label_from": "Repeater", "label_to": "Bigelow"}, {"type": "stay", "at": [42.09019438937389, -123.37205183944509], "location": "Bigelow", "anim_dur": 1.2, "n_loops": 1, "avg_signal": 37.0, "real_start": "2023-09-18T23:48:47", "real_end": "2023-09-18T23:48:47"}], "total_anim_seconds": 66.97, "n_stays": 15}}, "loop_seconds": 79.24, "window_start": "2023-09-16T00:00:00", "window_end": "2023-09-19T00:00:00", "icon_aspect": {"MYEV": 2.3794466403162056, "LANO": 4.193333333333333, "LACI": 1.7232472324723247}, "receiver_icon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABcAAAAaCAYAAABctMd+AAAACXBIWXMAAA7EAAAOxAGVKw4bAAACJ0lEQVRIidVV0W2rUAw9vvCaSJ0gUHUJukLhJ3QMMkbIGGGMpj/QFcISEZAJIkFee/1kmqYXaJRWbaU+f0WOfXx87Gts/KDZvwI82+wcWPY9np/u/OvL6lvBD+bhE2a/x9D/IDPT0mrvBc5FfhJcAsC8zjY79zMFWsmY12m1vzELdMCJeUnMCb8UigLnIjkUjcC8bIMsu0yr/ez4X9nEvjuKH4s6YeYVAGcAfgAA6+cF23+mxBwBaAHEmHkLwgyMJYjeGDFHadng1h3NsrKJTFJvzLUOCciF9WsHna6IJkw0AeuOJApYMTDPNruk7Zo5fCVlm8kayGFZnvDSSnXAD7JFkCKGT+LEz5blMWhLxkaZmnsALwDyRILAHXUm3/quxjdpUVemLDLAtKi3UEq6ygGaD8BbTZWa0NPfBJY976+WdCbArTxGUYkjZvHlICXbNtwW0U5rHfrXl0la1A8gkvbyXvGYtY57Aw1Fa98d5WnZyO8huCY8EOhedpaViqG1rNVR9z7jox+YasKifSNaR1py++CBO15lZZOzspaBcxGmZT0bIGkd94sweCG5aVGviKjyD2vYAW8DiWYEyAt1fHcszPsDdQYDFVLyQommDL4zczrgMsBTT18YZ2WzBjCQR+IlL+jlDQ7XmZty8iq+l/c7Phb/KbjWobkhSmvvW8Afi3rJRFPTx0RyZuX+xF8Cx4t1jpiYYp6cSzoLfns1Hr7UD9qPDvQf1cA4wMRZNtUAAAAASUVORK5CYII=", "capture_icon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABwklEQVR4nO2b3a3DIAyF6dWdoivlqgNkwA4QtStljd6XICEKARubn3C+l0glAXNiOyahxgAAAABgVm61B9y39ZM65/54VrNLfaCcCafQFEStY4mJ+2gIId6hxsR9JIVgd7Rv6+sw5s/5zZ38+zgukS5E2t3xOfyWXGyh3HV79xwBv25CDS+ykD3AGt4zFK/40TRkBIpzgAnE6P3xvIVyROh6arsTHl85gpMcWR5wFqPaRcxZ/5zcIRoCtSo4yXHIAsRUrlm+nkH1ApIAvU/eQhGhOARaT750/OyLA9m3ZxZj8sRBHZBzUiSmTmtxrTog1s7NT5fxAG4uuIwAXCBA6oRQbLV+9MXgLK2n94DknQwoOEwdYDnz2Ok9gPNKbNFc75e2qy6GrggEaG1AayBA6oTW7+0pcIo2zmpwqDpgmtUgF1YdcByHeB+QIssDel38pJjmlVhJUs4WYDQvyLW32ANaPxJLxycJEFO1tQg+FG/F/gBNQ0Zg+v0BInuEfA4jRUvmVJ7p9rtAaYLct/WjNXljKn0dtpPIFYOz64yLSAg4W9+Shvsx3PoRip2iUh35TLtX2Gfa3eIxevu/AAAAADAx//SkJfNnS5cTAAAAAElFTkSuQmCC", "park_boundary_style": {"outline": "rgba(0,132,168,0.85)", "weight": 2, "fill": "rgba(130,130,130,0.04)"}, "park_boundary_geojson": {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"Name": "Caves Monument"}, "geometry": {"type": "Polygon", "coordinates": [[[-123.43739817601, 42.1199671823026, 0.0], [-123.43746962172, 42.1203905795359, 0.0], [-123.437378806536, 42.1205442786348, 0.0], [-123.436927916942, 42.1206961889832, 0.0], [-123.436054674536, 42.1206601802128, 0.0], [-123.435672068582, 42.1212696259942, 0.0], [-123.435846554647, 42.1218988436406, 0.0], [-123.435800292309, 42.1221055196162, 0.0], [-123.435328521376, 42.122492076626, 0.0], [-123.434474313372, 42.12268279103, 0.0], [-123.433821300144, 42.1230083673543, 0.0], [-123.433533438605, 42.1235533732413, 0.0], [-123.432745922426, 42.1241717499171, 0.0], [-123.432661527502, 42.1243905612834, 0.0], [-123.432706818762, 42.1246343283456, 0.0], [-123.432611963854, 42.1248328222996, 0.0], [-123.4315000804, 42.1251634884907, 0.0], [-123.430499862925, 42.1250672979325, 0.0], [-123.430030100625, 42.1252513379601, 0.0], [-123.429745196339, 42.1257073891726, 0.0], [-123.429524075134, 42.1258572037587, 0.0], [-123.428779937702, 42.1258407319001, 0.0], [-123.42847823492, 42.1256743214492, 0.0], [-123.428335250975, 42.1252175957404, 0.0], [-123.428076530783, 42.1248981844059, 0.0], [-123.428201366065, 42.1247790098779, 0.0], [-123.428227415412, 42.1246095637795, 0.0], [-123.42810050053, 42.1234621753517, 0.0], [-123.427899107227, 42.1232906655833, 0.0], [-123.427072671538, 42.1231192699517, 0.0], [-123.426821742435, 42.1228453322084, 0.0], [-123.426836696689, 42.122453320421, 0.0], [-123.427271004282, 42.1216734672737, 0.0], [-123.427259513931, 42.121569442375, 0.0], [-123.427061571955, 42.1213660901723, 0.0], [-123.426394895351, 42.1210255987864, 0.0], [-123.426348443468, 42.1203023075463, 0.0], [-123.426096056399, 42.1199726187935, 0.0], [-123.425637656889, 42.1196980910781, 0.0], [-123.423756787704, 42.1206097391152, 0.0], [-123.421723983759, 42.1220285584032, 0.0], [-123.420726436077, 42.1226302613898, 0.0], [-123.418252165866, 42.1226767244614, 0.0], [-123.417359942956, 42.1225867766039, 0.0], [-123.416417274253, 42.1226329165566, 0.0], [-123.415298307582, 42.1225046082403, 0.0], [-123.414224896276, 42.1226970656201, 0.0], [-123.413602918045, 42.1231316182135, 0.0], [-123.413163829619, 42.123588534858, 0.0], [-123.412712282458, 42.1242354423578, 0.0], [-123.412451329953, 42.1244374081689, 0.0], [-123.410736697604, 42.1249350335944, 0.0], [-123.408827721031, 42.1251064789477, 0.0], [-123.40806278221, 42.1252842773155, 0.0], [-123.406584686157, 42.1262965077053, 0.0], [-123.405838279581, 42.1272408578999, 0.0], [-123.405651435392, 42.1273704098228, 0.0], [-123.40550931832, 42.1273270162341, 0.0], [-123.405270515575, 42.1270838364993, 0.0], [-123.403562817322, 42.1264901827976, 0.0], [-123.401642075514, 42.1254615508374, 0.0], [-123.400758564466, 42.1244657286908, 0.0], [-123.399570776064, 42.1228213425026, 0.0], [-123.39878055955, 42.1223866671822, 0.0], [-123.398035618126, 42.1214832062489, 0.0], [-123.396479081182, 42.1205748217146, 0.0], [-123.395341978424, 42.119517818302, 0.0], [-123.394545996522, 42.1189725358253, 0.0], [-123.393019460614, 42.118242525802, 0.0], [-123.392270400414, 42.1177698756022, 0.0], [-123.390526247628, 42.1173575954969, 0.0], [-123.389061291232, 42.1171210982851, 0.0], [-123.386922473508, 42.1172189167989, 0.0], [-123.385148822743, 42.1174904027314, 0.0], [-123.384678579844, 42.1174802363147, 0.0], [-123.384472962662, 42.1173862110426, 0.0], [-123.3843621941, 42.1172250118766, 0.0], [-123.384007447597, 42.1158849389384, 0.0], [-123.383910405292, 42.1151969532063, 0.0], [-123.384002099028, 42.1139986734223, 0.0], [-123.38438389021, 42.1126512045811, 0.0], [-123.384268676784, 42.1118278325936, 0.0], [-123.382941070998, 42.1094498936134, 0.0], [-123.382240712063, 42.1076665861018, 0.0], [-123.381879127585, 42.1071480397278, 0.0], [-123.380793364444, 42.1064213604303, 0.0], [-123.379588895226, 42.105841736211, 0.0], [-123.378291170102, 42.1048560727585, 0.0], [-123.377508091601, 42.1044900604229, 0.0], [-123.376923978257, 42.1041038974665, 0.0], [-123.376534395986, 42.1037247776145, 0.0], [-123.375950266473, 42.1029035884294, 0.0], [-123.375042579964, 42.1021469177207, 0.0], [-123.374468014813, 42.1018046621359, 0.0], [-123.373165825062, 42.1002759260516, 0.0], [-123.372138933911, 42.0997014719217, 0.0], [-123.370923873556, 42.0984192398853, 0.0], [-123.369163022886, 42.0970028822416, 0.0], [-123.368371891886, 42.0965306055759, 0.0], [-123.366630905662, 42.0956839807619, 0.0], [-123.364994419556, 42.0953411323682, 0.0], [-123.364592305787, 42.0951449150651, 0.0], [-123.363028858104, 42.0931636985467, 0.0], [-123.36145788703, 42.0909016714532, 0.0], [-123.360931967448, 42.0904996479914, 0.0], [-123.360140155526, 42.0902781510888, 0.0], [-123.360388489396, 42.0898980486181, 0.0], [-123.361442660586, 42.0894814254074, 0.0], [-123.361457030935, 42.0887402127371, 0.0], [-123.361573238797, 42.0883607010364, 0.0], [-123.362384733705, 42.0875006913067, 0.0], [-123.362590268242, 42.0871525487049, 0.0], [-123.362714062377, 42.0865721850112, 0.0], [-123.36286222511, 42.0862561329451, 0.0], [-123.363720506973, 42.0852325174461, 0.0], [-123.364185046468, 42.0844115708112, 0.0], [-123.364632578159, 42.0839451459919, 0.0], [-123.365964242533, 42.0829527877927, 0.0], [-123.367531049018, 42.0822204374918, 0.0], [-123.368078173331, 42.0820752854495, 0.0], [-123.369927254732, 42.0818590628813, 0.0], [-123.370876504493, 42.0818708671381, 0.0], [-123.373567540877, 42.0821413670327, 0.0], [-123.374762442139, 42.0824870836326, 0.0], [-123.375264391974, 42.0825469630353, 0.0], [-123.376390592777, 42.0824872383098, 0.0], [-123.377707116945, 42.0821987619137, 0.0], [-123.37879758097, 42.0821068351387, 0.0], [-123.379772635736, 42.0821474708167, 0.0], [-123.380737241298, 42.0823584140303, 0.0], [-123.38210095307, 42.0829021580127, 0.0], [-123.382946618095, 42.0834737974836, 0.0], [-123.383595861094, 42.0843978922885, 0.0], [-123.383878454912, 42.0854691822931, 0.0], [-123.384222029067, 42.0858295356595, 0.0], [-123.3846331736, 42.0861047787315, 0.0], [-123.385058710042, 42.0862706737414, 0.0], [-123.386071572203, 42.0863683351922, 0.0], [-123.387704306944, 42.0867791548444, 0.0], [-123.388875886144, 42.0873967209892, 0.0], [-123.390009459421, 42.0875463001406, 0.0], [-123.39040978195, 42.0877543201138, 0.0], [-123.391390191573, 42.0884731595545, 0.0], [-123.392358289785, 42.0885699383056, 0.0], [-123.393154946321, 42.0890457267963, 0.0], [-123.393538806324, 42.089153749596, 0.0], [-123.395701729441, 42.0891236533586, 0.0], [-123.396026970777, 42.0891939081116, 0.0], [-123.396541166446, 42.0894547511838, 0.0], [-123.396859784504, 42.0894854385727, 0.0], [-123.398240693624, 42.089253155875, 0.0], [-123.399807612397, 42.0887654646379, 0.0], [-123.400862007267, 42.0885865058487, 0.0], [-123.401967377936, 42.0877926855425, 0.0], [-123.402797589244, 42.0873129990167, 0.0], [-123.403491664463, 42.0870266472223, 0.0], [-123.404371225619, 42.0868643895206, 0.0], [-123.404828714237, 42.0864167961922, 0.0], [-123.405324011149, 42.0860792871021, 0.0], [-123.406317823636, 42.0856207720275, 0.0], [-123.406792150275, 42.0855296442268, 0.0], [-123.407517627902, 42.0855763651663, 0.0], [-123.408564086156, 42.0859025554344, 0.0], [-123.410347137791, 42.0861432051584, 0.0], [-123.411660037257, 42.0867698001697, 0.0], [-123.412663518311, 42.0870611631053, 0.0], [-123.413444327668, 42.0870591151128, 0.0], [-123.417842660759, 42.0864501157332, 0.0], [-123.418310216796, 42.0865616643011, 0.0], [-123.420016740951, 42.0872511961249, 0.0], [-123.421464717391, 42.0876520668564, 0.0], [-123.423906450623, 42.0889711866907, 0.0], [-123.424940888521, 42.0897637763058, 0.0], [-123.424994115498, 42.0900057559821, 0.0], [-123.424632879566, 42.0908185507355, 0.0], [-123.424490106724, 42.0913728341184, 0.0], [-123.42451589017, 42.0924794438597, 0.0], [-123.42534744895, 42.093330963621, 0.0], [-123.425904373884, 42.0943465720463, 0.0], [-123.426747768866, 42.0953674061699, 0.0], [-123.427312285462, 42.0963280582352, 0.0], [-123.429206440731, 42.0980488604912, 0.0], [-123.430619250823, 42.0991926238306, 0.0], [-123.431606517286, 42.100335384083, 0.0], [-123.431911785481, 42.1009229975457, 0.0], [-123.431893717666, 42.1022796875109, 0.0], [-123.431572921193, 42.1033307880329, 0.0], [-123.430909487508, 42.1046896805109, 0.0], [-123.430232008663, 42.1055713093866, 0.0], [-123.428670274067, 42.1063377308824, 0.0], [-123.427804094216, 42.1070141391622, 0.0], [-123.427380535864, 42.1075766375984, 0.0], [-123.427051764148, 42.1081769489885, 0.0], [-123.426844213792, 42.1087922535001, 0.0], [-123.426845007902, 42.1090913791765, 0.0], [-123.427510176234, 42.1096010974865, 0.0], [-123.427853985748, 42.1102508754436, 0.0], [-123.431310790996, 42.1121136772379, 0.0], [-123.432174801416, 42.1124700227847, 0.0], [-123.433382769572, 42.1128347382279, 0.0], [-123.433580444749, 42.1129711927739, 0.0], [-123.433659611478, 42.1133180641236, 0.0], [-123.433903205837, 42.1136170744826, 0.0], [-123.43552085517, 42.1147043164064, 0.0], [-123.435715580279, 42.1150575914157, 0.0], [-123.435636976793, 42.1158989358547, 0.0], [-123.435779362461, 42.1162488257729, 0.0], [-123.436402496824, 42.1166446568338, 0.0], [-123.437251043645, 42.1169682151578, 0.0], [-123.437620229667, 42.1172507182118, 0.0], [-123.437788728461, 42.1175281417993, 0.0], [-123.437823937031, 42.118168843607, 0.0], [-123.43739817601, 42.1199671823026, 0.0]]]}}]}};
+
+// ---------- Map setup ----------
+const allCoords = [
+  ...Object.values(DATA.receivers),
+  ...Object.values(DATA.capture)
+];
+const bounds = L.latLngBounds(allCoords);
+
+const map = L.map('map', {
+  zoomControl: true,
+  attributionControl: true,
+  minZoom: 11,
+  maxZoom: 16,
+}).fitBounds(bounds.pad(0.35));
+
+L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  {
+    attribution: '&copy; Esri'
+  }
+).addTo(map);
+
+// ---------- Park boundary (drawn once GeoJSON is supplied) ----------
+if (DATA.park_boundary_geojson) {
+  L.geoJSON(DATA.park_boundary_geojson, {
+    style: {
+      color: DATA.park_boundary_style.outline,
+      weight: DATA.park_boundary_style.weight,
+      fillColor: DATA.park_boundary_style.fill,
+      fillOpacity: 1,
+      dashArray: null
+    }
+  }).addTo(map);
+}
+
+const DASH_COLOR = 'rgba(232, 226, 212, 0.45)';
+
+
+// ---------- Site markers ----------
+const receiverIcon = L.icon({
+  iconUrl: DATA.receiver_icon,
+ iconSize: [32, 36],
+ iconAnchor: [16, 32],
+  className: 'receiver-icon'
+});
+
+const captureIcon = L.icon({
+  iconUrl: 'net_icon.svg',
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+  className: 'capture-icon'
+});
+
+
+Object.entries(DATA.receivers).forEach(([name, coord]) => {
+  L.marker(coord, {icon: receiverIcon, zIndexOffset: 100}).addTo(map);
+  L.marker(coord, {
+    icon: L.divIcon({className:'', html:`<div class="site-label">${name}</div>`, iconSize:[0,0], iconAnchor:[-14,4]})
+  }).addTo(map);
+});
+
+const captureSeen = new Set();
+Object.entries(DATA.capture).forEach(([tag, coord]) => {
+  const key = coord.join(',');
+  if (captureSeen.has(key)) return;
+  captureSeen.add(key);
+  L.marker(coord, {icon: captureIcon, zIndexOffset: 90}).addTo(map);
+});
+
+// ---------- Bat icons (per-species aspect ratio preserved) ----------
+const CUSTOM_ICONS = {
+  "149": "silver_telemetry.svg",
+  "160": "myotis_telemetry.svg",
+  "163": "hoary_telemetry.svg"
+};
+
+const BAT_TARGET_WIDTH = 60;
+
+function makeBatIcon(tag, species) {
+  const aspect = DATA.icon_aspect[species] || 2.2;
+  const w = BAT_TARGET_WIDTH;
+  const h = w / aspect;
+
+  return L.icon({
+    iconUrl: CUSTOM_ICONS[tag] || DATA.icons[species],
+    iconSize: [w, h],
+    iconAnchor: [w*0.7, h*.2],
+    className: 'bat-marker'
+  });
+}
+
+const batMarkers = {};
+
+Object.entries(DATA.bats).forEach(([tag, bat]) => {
+  const startPos = bat.segments[0].from;
+
+  const marker = L.marker(startPos, {
+    icon: makeBatIcon(tag, bat.species),
+    zIndexOffset: 500
+  });
+
+  marker.addTo(map);
+  batMarkers[tag] = marker;
+
+});
+
+// ---------- Precompute cumulative timing per bat ----------
+function prepBat(bat) {
+  let t = 0;
+  const segs = bat.segments.map(seg => {
+    const s = Object.assign({}, seg, {t_start: t, t_end: t + seg.anim_dur});
+    t += seg.anim_dur;
+    return s;
+  });
+  const lastSeg = segs[segs.length - 1];
+  const lastCoord = lastSeg.type === 'stay' ? lastSeg.at : lastSeg.to;
+  const lastLabel = lastSeg.type === 'stay' ? lastSeg.location : (lastSeg.label_to || '');
+  if (t < DATA.loop_seconds - 0.05) {
+    segs.push({
+      type: 'stay', at: lastCoord, location: lastLabel,
+      anim_dur: DATA.loop_seconds - t, n_loops: Math.max(1, Math.round((DATA.loop_seconds-t)/1.4)),
+      avg_signal: 45,
+      t_start: t, t_end: DATA.loop_seconds
+    });
+  }
+  return segs;
+}
+const prepped = {};
+Object.entries(DATA.bats).forEach(([tag, bat]) => { prepped[tag] = prepBat(bat); });
+
+// ---------- Helpers ----------
+function lerp(a, b, f) { return a + (b - a) * f; }
+function lerpCoord(c1, c2, f) { return [lerp(c1[0], c2[0], f), lerp(c1[1], c2[1], f)]; }
+function bearing(c1, c2) {
+  const toRad = d => d * Math.PI/180, toDeg = r => r*180/Math.PI;
+  const lat1=toRad(c1[0]), lat2=toRad(c2[0]), dLon=toRad(c2[1]-c1[1]);
+  const y = Math.sin(dLon)*Math.cos(lat2);
+  const x = Math.cos(lat1)*Math.sin(lat2) - Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);
+  return (toDeg(Math.atan2(y,x)) + 360) % 360;
+}
+function arcOffset(c1, c2, f) {
+  const bulge = Math.sin(f * Math.PI) * 0.00028 * distApprox(c1,c2);
+  const dx = c2[1]-c1[1], dy = c2[0]-c1[0];
+  const len = Math.sqrt(dx*dx+dy*dy) || 1;
+  const px = -dy/len, py = dx/len;
+  return [py*bulge, px*bulge];
+}
+function distApprox(c1,c2){
+  const dx=c2[1]-c1[1], dy=c2[0]-c1[0];
+  return Math.sqrt(dx*dx+dy*dy) * 3000;
+}
+function loopRadius(avgSignal) {
+  const s = Math.max(15, Math.min(75, avgSignal));
+  const f = 1 - (s - 15) / (75 - 15);
+  return 0.00035 + f * 0.0012;
+}
+
+const OFFSCREEN_LIFT = 0.028;
+
+function positionForSegment(seg, tLocal) {
+  const dur = seg.anim_dur || 0.0001;
+  const f = Math.max(0, Math.min(1, tLocal / dur));
+ if (seg.type === 'flight') {
+  const base = lerpCoord(seg.from, seg.to, f);
+  const off = arcOffset(seg.from, seg.to, f);
+
+  const coord = [
+    base[0] + off[0],
+    base[1] + off[1]
+  ];
+
+  const nextF = Math.min(1, f + 0.02);
+
+  const nextBase = lerpCoord(seg.from, seg.to, nextF);
+  const nextOff = arcOffset(seg.from, seg.to, nextF);
+
+  const nextCoord = [
+    nextBase[0] + nextOff[0],
+    nextBase[1] + nextOff[1]
+  ];
+
+  return {
+    coord,
+    angle: bearing(coord, nextCoord),
+    opacity: 1
+  };
+}
+  if (seg.type === 'stay') {
+    const r = loopRadius(seg.avg_signal);
+    const angle = f * seg.n_loops * Math.PI * 2;
+    const wob = 1 + 0.15*Math.sin(f*seg.n_loops*Math.PI*6);
+    const coord = [seg.at[0] + Math.sin(angle)*r*wob, seg.at[1] + Math.cos(angle)*r*wob*1.3];
+    const headingCoord = [seg.at[0] + Math.sin(angle+0.25)*r*wob, seg.at[1] + Math.cos(angle+0.25)*r*wob*1.3];
+    return { coord, angle: bearing(coord, headingCoord), opacity: 1 };
+  }
+  if (seg.type === 'offscreen') {
+    if (f < 0.3) {
+      const ff = f/0.3;
+      const away = [seg.from[0]+OFFSCREEN_LIFT*ff, seg.from[1]];
+      return { coord: away, angle: bearing(seg.from, [seg.from[0]+1, seg.from[1]]), opacity: 1-ff*0.9 };
+    } else if (f < 0.7) {
+      return { coord: [seg.from[0]+OFFSCREEN_LIFT, seg.from[1]], angle: 0, opacity: 0 };
+    } else {
+      const ff = (f-0.7)/0.3;
+      const enter = [seg.to[0]+OFFSCREEN_LIFT*(1-ff), seg.to[1]];
+      return { coord: enter, angle: bearing([seg.to[0]+1, seg.to[1]], seg.to), opacity: ff*0.9+0.1 };
+    }
+  }
+  return { coord: seg.type==='flight'?seg.from:seg.at, angle: 0, opacity: 1 };
+}
+
+function findSegment(segs, t) {
+  for (const s of segs) {
+    if (t >= s.t_start && t < s.t_end) return s;
+  }
+  return segs[segs.length-1];
+}
+
+// ---------- Compressed clock ----------
+const winStart = new Date(DATA.window_start);
+const winEnd = new Date(DATA.window_end);
+const winSpanMs = winEnd - winStart;
+const clockTimeEl = document.getElementById('clockTime');
+const clockDateEl = document.getElementById('clockDate');
+function updateClock(loopFrac) {
+  const simTime = new Date(winStart.getTime() + winSpanMs * loopFrac);
+  clockTimeEl.textContent = simTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  clockDateEl.textContent = simTime.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'});
+}
+
+// ---------- Animation loop ----------
+const LOOP_MS = DATA.loop_seconds * 1800;
+const t0 = performance.now();
+requestAnimationFrame(function frame(now) {
+  const elapsed = ((now - t0) % LOOP_MS) / 1000;
+  updateClock(elapsed / DATA.loop_seconds);
+  Object.entries(prepped).forEach(([tag, segs]) => {
+    const seg = findSegment(segs, elapsed);
+    const tLocal = elapsed - seg.t_start;
+    const r = positionForSegment(seg, tLocal);
+    const marker = batMarkers[tag];
+marker.setLatLng(r.coord);
+
+
+const el = marker.getElement();
+
+if (el) {
+  const rot = r.angle;   // or whatever value finally worked
+  const existing = el.style.transform.replace(/\s*rotate\([^)]*\)/, '');
+  el.style.transform = existing + ` rotate(${rot}deg)`;
+  el.style.opacity = r.opacity;
+}
+
+});
+
+requestAnimationFrame(frame);
+});
+
+// ---------- Legend ----------
+const speciesNames = {
+  MYEV: 'Long-eared myotis (160)',
+  LANO: 'Silver-haired bat (149)',
+  LACI: 'Hoary bat (163)'
+};
+
+let legendHtml = '<div class="legend-title">Bats</div>';
+
+Object.entries(DATA.bats).forEach(([tag, bat]) => {
+  legendHtml +=
+    '<div class="legend-row">' +
+    (speciesNames[bat.species] || bat.species) +
+    '</div>';
+});
+
+legendHtml += '<div class="legend-title">Sites</div>';
+legendHtml += '<div class="legend-row">Receiver / repeater</div>';
+legendHtml += '<div class="legend-row">Capture (netting) site</div>';
+
+document.getElementById('legend').innerHTML = legendHtml;
+
+</script>
+</body>
+</html>
